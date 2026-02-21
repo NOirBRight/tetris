@@ -31,7 +31,10 @@
     <div class="hold-label">HOLD</div>
     <canvas id="hold-canvas" width="80" height="80"></canvas>
   </div>
-  <div id="score">Score: 0</div>
+  <div style="display: flex; flex-direction: column; align-items: flex-end;">
+    <div id="score">Score: 0</div>
+    <div id="btn-music" style="margin-top: 10px; padding: 5px 10px; background: #444; border: 2px solid #666; border-radius: 4px; cursor: pointer; font-size: 12px; user-select: none; -webkit-tap-highlight-color: transparent;">🎵 Music: Off</div>
+  </div>
 </div>
 <canvas id="tetris" width="240" height="400"></canvas>
 <div class="controls">
@@ -52,7 +55,108 @@
   holdContext.scale(20, 20);
 
   const colors = [null, '#FF0D72', '#0DC2FF', '#0DFF72', '#F538FF', '#FF8E0D', '#FFE138', '#3877FF'];
-  
+
+  // Web Audio API BGM (Korobeiniki)
+  let audioCtx = null;
+  let bgmBuffer = null;
+  let bgmSource = null;
+  let isPlayingBGM = false;
+  let hasInteracted = false;
+
+  const bgmNotes = [
+    ['E5', 4], ['B4', 2], ['C5', 2], ['D5', 4], ['C5', 2], ['B4', 2],
+    ['A4', 4], ['A4', 2], ['C5', 2], ['E5', 4], ['D5', 2], ['C5', 2],
+    ['B4', 6], ['C5', 2], ['D5', 4], ['E5', 4],
+    ['C5', 4], ['A4', 4], ['A4', 8],
+    ['D5', 6], ['F5', 2], ['A5', 4], ['G5', 2], ['F5', 2],
+    ['E5', 6], ['C5', 2], ['E5', 4], ['D5', 2], ['C5', 2],
+    ['B4', 6], ['C5', 2], ['D5', 4], ['E5', 4],
+    ['C5', 4], ['A4', 4], ['A4', 8]
+  ];
+  const freqs = { A4: 440, B4: 493.88, C5: 523.25, D5: 587.33, E5: 659.25, F5: 698.46, G5: 783.99, A5: 880 };
+
+  function createBGMBuffer(ctx) {
+    const tempo = 150;
+    const sixteenthTime = (60 / tempo) / 4;
+    let totalLength = 0;
+    for (let i = 0; i < bgmNotes.length; i++) totalLength += bgmNotes[i][1] * sixteenthTime;
+    
+    const sampleRate = ctx.sampleRate;
+    const buffer = ctx.createBuffer(1, Math.ceil(sampleRate * totalLength), sampleRate);
+    const data = buffer.getChannelData(0);
+    
+    let time = 0;
+    for (let i = 0; i < bgmNotes.length; i++) {
+      const [note, duration] = bgmNotes[i];
+      const noteTime = duration * sixteenthTime;
+      const startSample = Math.floor(time * sampleRate);
+      const endSample = Math.floor((time + noteTime) * sampleRate);
+      
+      if (note) {
+        const freq = freqs[note];
+        for (let j = startSample; j < endSample; j++) {
+          const t = (j - startSample) / sampleRate;
+          let val = Math.sign(Math.sin(2 * Math.PI * freq * t));
+          let env = 1;
+          const envAttack = 0.01 * sampleRate;
+          const envRelease = 0.01 * sampleRate;
+          if (j - startSample < envAttack) env = (j - startSample) / envAttack;
+          else if (endSample - j < envRelease) env = (endSample - j) / envRelease;
+          if (endSample - j < 0.02 * sampleRate) env = 0;
+          data[j] = val * env * 0.05; // Set volume directly here
+        }
+      }
+      time += noteTime;
+    }
+    return buffer;
+  }
+
+  function toggleBGM() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      bgmBuffer = createBGMBuffer(audioCtx);
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+
+    const btn = document.getElementById('btn-music');
+    if (isPlayingBGM) {
+      if (bgmSource) {
+        bgmSource.stop();
+        bgmSource.disconnect();
+        bgmSource = null;
+      }
+      isPlayingBGM = false;
+      if (btn) btn.innerText = '🎵 Music: Off';
+    } else {
+      bgmSource = audioCtx.createBufferSource();
+      bgmSource.buffer = bgmBuffer;
+      bgmSource.loop = true;
+      bgmSource.connect(audioCtx.destination);
+      bgmSource.start();
+      isPlayingBGM = true;
+      if (btn) btn.innerText = '🎵 Music: On';
+    }
+  }
+
+  const btnMusic = document.getElementById('btn-music');
+  btnMusic.addEventListener('click', (e) => {
+    e.stopPropagation();
+    hasInteracted = true;
+    toggleBGM();
+  });
+
+  function autoStartBGM(e) {
+    if (e.target === btnMusic || e.target.closest('#btn-music')) return;
+    if (!hasInteracted) {
+      hasInteracted = true;
+      toggleBGM();
+    }
+  }
+
+  document.addEventListener('keydown', autoStartBGM);
+  document.addEventListener('touchstart', autoStartBGM, { passive: true });
+  document.addEventListener('mousedown', autoStartBGM);
+
   // Basic SRS Wall Kick Data (simplified)
   // Check standard offsets: (0,0), (-1,0), (1,0), (0,-1), (-1,-1), (1,-1), (0,1), (-1,1), (1,1), (0,-2)
   const kickOffsets = [
