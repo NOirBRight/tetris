@@ -6,11 +6,17 @@
 <title>Mobile Tetris</title>
 <style>
   body { background: #202028; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; overflow: hidden; touch-action: none; }
-  #score { font-size: 24px; margin-bottom: 10px; font-weight: bold; }
-  canvas { background: #000; outline: 2px solid #555; max-width: 100%; height: auto; max-height: 55vh; display: block; }
-  .controls { display: grid; grid-template-columns: 80px 80px 80px; grid-template-rows: 60px 60px 60px; gap: 10px; margin-top: 20px; }
+  .header { display: flex; justify-content: space-between; width: 240px; margin-bottom: 10px; align-items: flex-end; }
+  #score { font-size: 24px; font-weight: bold; }
+  .hold-container { display: flex; flex-direction: column; align-items: center; }
+  .hold-label { font-size: 12px; margin-bottom: 2px; color: #aaa; }
+  #hold-canvas { background: #000; outline: 2px solid #555; width: 60px; height: 60px; display: block; }
+  canvas#tetris { background: #000; outline: 2px solid #555; max-width: 100%; height: auto; max-height: 55vh; display: block; }
+  .controls { display: grid; grid-template-columns: 80px 80px 80px; grid-template-rows: 60px 60px 60px 60px; gap: 10px; margin-top: 20px; }
   .btn { background: #444; border: 2px solid #666; color: white; border-radius: 8px; font-size: 14px; font-weight: bold; display: flex; align-items: center; justify-content: center; cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent; }
   .btn:active { background: #666; }
+  #btn-hold { grid-column: 1; grid-row: 1; background: #55a; }
+  #btn-hold:active { background: #77c; }
   #btn-rotate { grid-column: 2; grid-row: 1; }
   #btn-left { grid-column: 1; grid-row: 2; }
   #btn-drop { grid-column: 2; grid-row: 2; }
@@ -20,9 +26,16 @@
 </style>
 </head>
 <body>
-<div id="score">Score: 0</div>
+<div class="header">
+  <div class="hold-container">
+    <div class="hold-label">HOLD</div>
+    <canvas id="hold-canvas" width="80" height="80"></canvas>
+  </div>
+  <div id="score">Score: 0</div>
+</div>
 <canvas id="tetris" width="240" height="400"></canvas>
 <div class="controls">
+  <div class="btn" id="btn-hold">Hold</div>
   <div class="btn" id="btn-rotate">Rotate</div>
   <div class="btn" id="btn-left">Left</div>
   <div class="btn" id="btn-drop">Drop</div>
@@ -33,6 +46,19 @@
   const canvas = document.getElementById('tetris');
   const context = canvas.getContext('2d');
   context.scale(20, 20);
+
+  const holdCanvas = document.getElementById('hold-canvas');
+  const holdContext = holdCanvas.getContext('2d');
+  holdContext.scale(20, 20);
+
+  const colors = [null, '#FF0D72', '#0DC2FF', '#0DFF72', '#F538FF', '#FF8E0D', '#FFE138', '#3877FF'];
+  
+  // Basic SRS Wall Kick Data (simplified)
+  // Check standard offsets: (0,0), (-1,0), (1,0), (0,-1), (-1,-1), (1,-1), (0,1), (-1,1), (1,1), (0,-2)
+  const kickOffsets = [
+    {x: 0, y: 0}, {x: -1, y: 0}, {x: 1, y: 0}, {x: 0, y: -1},
+    {x: -1, y: -1}, {x: 1, y: -1}, {x: 0, y: 1}, {x: -1, y: 1}, {x: 1, y: 1}, {x: 0, y: -2}
+  ];
 
   function arenaSweep() {
     let rowCount = 1;
@@ -68,32 +94,89 @@
   }
 
   function createPiece(type) {
-    if (type === 'I') return [[0, 1, 0, 0], [0, 1, 0, 0], [0, 1, 0, 0], [0, 1, 0, 0]];
-    if (type === 'L') return [[0, 2, 0], [0, 2, 0], [0, 2, 2]];
-    if (type === 'J') return [[0, 3, 0], [0, 3, 0], [3, 3, 0]];
+    if (type === 'I') return [[0, 0, 0, 0], [1, 1, 1, 1], [0, 0, 0, 0], [0, 0, 0, 0]]; // Fixed I piece center
+    if (type === 'J') return [[2, 0, 0], [2, 2, 2], [0, 0, 0]];
+    if (type === 'L') return [[0, 0, 3], [3, 3, 3], [0, 0, 0]];
     if (type === 'O') return [[4, 4], [4, 4]];
-    if (type === 'Z') return [[5, 5, 0], [0, 5, 5], [0, 0, 0]];
-    if (type === 'S') return [[0, 6, 6], [6, 6, 0], [0, 0, 0]];
-    if (type === 'T') return [[0, 7, 0], [7, 7, 7], [0, 0, 0]];
+    if (type === 'S') return [[0, 5, 5], [5, 5, 0], [0, 0, 0]];
+    if (type === 'T') return [[0, 6, 0], [6, 6, 6], [0, 0, 0]];
+    if (type === 'Z') return [[7, 7, 0], [0, 7, 7], [0, 0, 0]];
   }
 
-  function drawMatrix(matrix, offset) {
-    const colors = [null, '#FF0D72', '#0DC2FF', '#0DFF72', '#F538FF', '#FF8E0D', '#FFE138', '#3877FF'];
+  const pieceTypes = 'IJLOSTZ';
+
+  function drawMatrix(matrix, offset, ctx = context, alpha = 1) {
+    if (!matrix) return;
     matrix.forEach((row, y) => {
       row.forEach((value, x) => {
         if (value !== 0) {
-          context.fillStyle = colors[value];
-          context.fillRect(x + offset.x, y + offset.y, 1, 1);
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = colors[value];
+          ctx.fillRect(x + offset.x, y + offset.y, 1, 1);
+          ctx.globalAlpha = 1;
         }
       });
     });
   }
 
+  function drawGrid() {
+    context.strokeStyle = '#333';
+    context.lineWidth = 0.05;
+    for(let x = 0; x <= 12; x++) {
+      context.beginPath();
+      context.moveTo(x, 0);
+      context.lineTo(x, 20);
+      context.stroke();
+    }
+    for(let y = 0; y <= 20; y++) {
+      context.beginPath();
+      context.moveTo(0, y);
+      context.lineTo(12, y);
+      context.stroke();
+    }
+  }
+
+  function getGhostPos() {
+    const ghost = {
+      matrix: player.matrix,
+      pos: { x: player.pos.x, y: player.pos.y }
+    };
+    while (!collide(arena, ghost)) {
+      ghost.pos.y++;
+    }
+    ghost.pos.y--;
+    return ghost.pos;
+  }
+
+  function drawHold() {
+    holdContext.fillStyle = '#000';
+    holdContext.fillRect(0, 0, holdCanvas.width, holdCanvas.height);
+    if (player.holdMatrix) {
+      // Center the piece in the 4x4 hold box
+      const offset = {
+        x: (4 - player.holdMatrix[0].length) / 2,
+        y: (4 - player.holdMatrix.length) / 2
+      };
+      drawMatrix(player.holdMatrix, offset, holdContext);
+    }
+  }
+
   function draw() {
     context.fillStyle = '#000';
     context.fillRect(0, 0, canvas.width, canvas.height);
+    
+    drawGrid();
     drawMatrix(arena, {x: 0, y: 0});
+    
+    // Draw ghost
+    if (player.matrix) {
+      const ghostPos = getGhostPos();
+      drawMatrix(player.matrix, ghostPos, context, 0.3);
+    }
+    
+    // Draw player
     drawMatrix(player.matrix, player.pos);
+    drawHold();
   }
 
   function merge(arena, player) {
@@ -133,31 +216,66 @@
     if (collide(arena, player)) player.pos.x -= offset;
   }
 
-  function playerReset() {
-    currentPieceId++;
-    const pieces = 'TJLOSZI';
-    player.matrix = createPiece(pieces[pieces.length * Math.random() | 0]);
+  function spawnPiece(type) {
+    player.matrix = createPiece(type);
+    player.type = type;
     player.pos.y = 0;
     player.pos.x = (arena[0].length / 2 | 0) - (player.matrix[0].length / 2 | 0);
+  }
+
+  function playerReset() {
+    currentPieceId++;
+    const type = pieceTypes[pieceTypes.length * Math.random() | 0];
+    spawnPiece(type);
+    player.canHold = true;
     if (collide(arena, player)) {
       arena.forEach(row => row.fill(0));
       player.score = 0;
+      player.holdMatrix = null;
+      player.holdType = null;
       updateScore();
     }
   }
 
+  function playerHold() {
+    if (!player.canHold) return;
+    
+    const currentType = player.type;
+    if (player.holdType) {
+      spawnPiece(player.holdType);
+      player.holdType = currentType;
+      player.holdMatrix = createPiece(currentType);
+    } else {
+      player.holdType = currentType;
+      player.holdMatrix = createPiece(currentType);
+      currentPieceId++;
+      spawnPiece(pieceTypes[pieceTypes.length * Math.random() | 0]);
+    }
+    
+    player.canHold = false;
+    dropCounter = 0;
+  }
+
   function playerRotate(dir) {
-    const pos = player.pos.x;
-    let offset = 1;
+    const pos = { x: player.pos.x, y: player.pos.y };
     rotate(player.matrix, dir);
-    while (collide(arena, player)) {
-      player.pos.x += offset;
-      offset = -(offset + (offset > 0 ? 1 : -1));
-      if (offset > player.matrix[0].length) {
-        rotate(player.matrix, -dir);
-        player.pos.x = pos;
-        return;
+    
+    // Basic SRS Wall Kicks
+    let kicked = false;
+    for (let offset of kickOffsets) {
+      player.pos.x = pos.x + offset.x;
+      player.pos.y = pos.y + offset.y;
+      if (!collide(arena, player)) {
+        kicked = true;
+        break;
       }
+    }
+    
+    if (!kicked) {
+      // Revert rotation if all kicks fail
+      rotate(player.matrix, -dir);
+      player.pos.x = pos.x;
+      player.pos.y = pos.y;
     }
   }
 
@@ -199,6 +317,7 @@
     }
     else if (event.keyCode === 38) playerRotate(1);
     else if (event.keyCode === 32) playerHardDrop();
+    else if (event.keyCode === 67 || event.keyCode === 16) playerHold(); // C or Shift
   });
 
   document.addEventListener('keyup', event => {
@@ -207,6 +326,7 @@
 
   const addTouch = (id, action) => {
     const el = document.getElementById(id);
+    if(!el) return;
     const trigger = (e) => { if(e.cancelable) e.preventDefault(); action(); };
     el.addEventListener('mousedown', trigger);
     el.addEventListener('touchstart', trigger, { passive: false });
@@ -214,6 +334,7 @@
 
   const addContinuousTouch = (id, action, onStop) => {
     const el = document.getElementById(id);
+    if(!el) return;
     let timeoutId, intervalId;
     
     const start = (e) => {
@@ -252,9 +373,10 @@
   });
   addTouch('btn-rotate', () => playerRotate(1));
   addTouch('btn-hard', () => playerHardDrop());
+  addTouch('btn-hold', () => playerHold());
 
   const arena = createMatrix(12, 20);
-  const player = { pos: {x: 0, y: 0}, matrix: null, score: 0 };
+  const player = { pos: {x: 0, y: 0}, matrix: null, score: 0, holdMatrix: null, holdType: null, canHold: true, type: null };
 
   playerReset();
   updateScore();
